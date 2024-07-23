@@ -1,9 +1,10 @@
 package com.hodbenor.project.accumulation.service.service;
 
-import com.hodbenor.project.accumulation.service.data.UserMissionDal;
+import com.hodbenor.project.accumulation.service.data.MissionDal;
+import com.hodbenor.project.accumulation.service.data.UserDal;
 import com.hodbenor.project.accumulation.service.data.beans.Mission;
 import com.hodbenor.project.accumulation.service.data.beans.User;
-import com.hodbenor.project.accumulation.service.rest.beans.WinSlotMachineResult;
+import com.hodbenor.project.accumulation.service.rest.beans.WinSlotMachineResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -13,20 +14,28 @@ import java.util.Map;
 @Service
 public class MissionsManagerImpl implements MissionsManager {
 
-    private final UserMissionDal userMissionDal;
+    private final UserDal userDal;
+    private final MissionDal missionDal;
 
-    public MissionsManagerImpl(UserMissionDal userMissionDal) {
-        this.userMissionDal = userMissionDal;
+    public MissionsManagerImpl(UserDal userDal, MissionDal missionDal) {
+        this.userDal = userDal;
+        this.missionDal = missionDal;
+
+        //Mocks for testing
+        User testUser = new User(1234, "1234", "James");
+        userDal.saveUser(testUser);
+        userDal.updateCurrentUserMission(testUser, 1, missionDal.getMissions().get(0).pointsGoal());
+        userDal.incrSpinsBalance(testUser, 10);
     }
 
     @Override
-    public WinSlotMachineResult winSlotMachine(long userId, List<Integer> digits) {
-        User user = userMissionDal.getUser(userId);
-        userMissionDal.incPointsBalance(user, calcWinningPoints(digits));
+    public WinSlotMachineResponse winSlotMachine(long userId, List<Integer> digits) {
+        User user = userDal.getUser(userId);
+        userDal.incrPointsBalance(user, calcWinningPoints(digits));
         Map<String, Integer> rewards = new HashMap<>();
-        Mission currentMission = userMissionDal.getCurrentMission(user);
-        while (currentMission.pointsGoal() <= userMissionDal.getPointsBalance(user)) {
-            userMissionDal.decreasePointsBalance(user, currentMission.pointsGoal());
+        Mission currentMission = missionDal.getCurrentMission(userDal.getCurrentUserMissionOrder(user));
+        while (currentMission.pointsGoal() <= userDal.getPointsBalance(user)) {
+            userDal.decrPointsBalance(user, currentMission.pointsGoal());
             handleRewards(user, currentMission);
             currentMission.rewards().forEach(rewardItem -> {
                 int value = rewards.getOrDefault(rewardItem.name(), 0) + rewardItem.value();
@@ -35,7 +44,7 @@ public class MissionsManagerImpl implements MissionsManager {
             currentMission = promoteUserToNextMission(user);
         }
 
-        return new WinSlotMachineResult(rewards);
+        return new WinSlotMachineResponse(rewards);
     }
 
     private int calcWinningPoints(List<Integer> digits) {
@@ -45,21 +54,18 @@ public class MissionsManagerImpl implements MissionsManager {
     private void handleRewards(User user, Mission currentMission) {
         currentMission.rewards().forEach(rewardItem -> {
             switch (rewardItem.name()) {
-                case "spins" -> userMissionDal.incSpinsBalance(user, rewardItem.value());
-                case "coins" -> userMissionDal.incCoinsBalance(user, rewardItem.value());
+                case "spins" -> userDal.incrSpinsBalance(user, rewardItem.value());
+                case "coins" -> userDal.incrCoinsBalance(user, rewardItem.value());
             }
         });
     }
 
     private Mission promoteUserToNextMission(User user) {
-        int currentMissionOrder = userMissionDal.getCurrentMissionOrder(user);
+        int currentMissionOrder = userDal.getCurrentUserMissionOrder(user);
+        int nextMissionOrder = currentMissionOrder < missionDal.getMissions().size() ? currentMissionOrder + 1 : missionDal.getRepeatedOrder();
+        Mission mission = missionDal.getCurrentMission(nextMissionOrder);
+        userDal.updateCurrentUserMission(user, nextMissionOrder, mission.pointsGoal());
 
-        if (currentMissionOrder < userMissionDal.getMissions().size()) {
-            userMissionDal.updateCurrentMissionOrder(user, currentMissionOrder + 1);
-        } else {
-            userMissionDal.updateCurrentMissionOrder(user, userMissionDal.getRepeatedOrder());
-        }
-
-        return userMissionDal.getCurrentMission(user);
+        return missionDal.getCurrentMission(nextMissionOrder);
     }
 }

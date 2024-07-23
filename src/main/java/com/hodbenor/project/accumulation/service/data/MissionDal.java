@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hodbenor.project.accumulation.service.data.beans.Mission;
 import com.hodbenor.project.accumulation.service.data.beans.MissionsConfiguration;
 import com.hodbenor.project.accumulation.service.data.beans.RewardItem;
+import com.hodbenor.project.accumulation.service.data.beans.User;
+import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,37 +14,33 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public class MissionDao {
-
+@Component
+public class MissionDal {
     private final ObjectMapper mapper = new ObjectMapper();
     private List<Mission> missions;
-    private int repeatedIndex;
+    private int repeatedOrder;
 
-    //   private Map<Integer, Mission> missions;
-    public MissionDao() {
-
+    public MissionDal() {
         loadMissions();
     }
 
-    public List<Mission> getMissions() {
+    public int getRepeatedOrder() {
+        return repeatedOrder;
+    }
 
+    public List<Mission> getMissions() {
         return missions;
     }
+
     public Mission getCurrentMission(int missionOrder) {
-
-        return missionOrder > 1 ? missions.get(missionOrder - 1) : missions.get(repeatedIndex);
-    }
-
-    public Mission getNextMission(int missionOrder) {
-
-        return missionOrder > 1 ? missions.get(missionOrder - 1) : missions.get(repeatedIndex);
+        return missionOrder > 0 && missionOrder <= missions.size() ? missions.get(missionOrder - 1) : missions.get(repeatedOrder - 1);
     }
 
     private void loadMissions() {
         try {
-            File missionJson = new File(Objects.requireNonNull(getClass().getResource("/missions-config.json")).getFile());
-            MissionsConfiguration missionsConfiguration = mapper.readValue(missionJson, MissionsConfiguration.class);
-            repeatedIndex = missionsConfiguration.repeatedIndex() - 1;
+            File missionsFile = new File(Objects.requireNonNull(getClass().getResource("/missions-config.json")).getFile());
+            MissionsConfiguration missionsConfiguration = mapper.readValue(missionsFile, MissionsConfiguration.class);
+            repeatedOrder = missionsConfiguration.repeatedIndex();
 
             for (Mission mission : missionsConfiguration.missions()) {
                 System.out.println("Points Goal: " + mission.pointsGoal());

@@ -2,7 +2,6 @@ package com.hodbenor.project.accumulation.service.data;
 
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hodbenor.project.accumulation.service.data.beans.User;
 import org.springframework.stereotype.Repository;
@@ -18,9 +17,11 @@ public class UserRepository {
     private static final String USER_POINTS_PREFIX = "user:points:";
     private static final String USER_SPINS_PREFIX = "user:spins:";
     private static final String USER_COINS_PREFIX = "user:coins:";
+    private static final String USER_MISSION_PREFIX = "user:mission:";
     private static final String LOCK_KEY_POINTS = "resource_lock_points";
     private static final String LOCK_KEY_SPINS = "resource_lock_spins";
     private static final String LOCK_KEY_COINS = "resource_lock_coins";
+    private static final String LOCK_KEY_MISSION = "resource_lock_mission";
     private final JedisPool jedisPool;
 
     public UserRepository() {
@@ -31,7 +32,7 @@ public class UserRepository {
         try (Jedis jedis = jedisPool.getResource()) {
             ObjectMapper objectMapper = new ObjectMapper();
             String userJson = objectMapper.writeValueAsString(user);
-            jedis.set(USER_PREFIX + user.userId(), userJson);
+            jedis.set(USER_PREFIX + user.id(), userJson);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -52,15 +53,15 @@ public class UserRepository {
     }
 
     public int getPointsBalance(long userId) {
-        return getBalance(userId, USER_POINTS_PREFIX);
+        return getIntItem(userId, USER_POINTS_PREFIX);
     }
 
     public int getSpinsBalance(long userId) {
-        return getBalance(userId, USER_SPINS_PREFIX);
+        return getIntItem(userId, USER_SPINS_PREFIX);
     }
 
     public int getCoinsBalance(long userId) {
-        return getBalance(userId, USER_COINS_PREFIX);
+        return getIntItem(userId, USER_COINS_PREFIX);
     }
 
     public void incrUserPointsBalance(long userId, long incrBy) {
@@ -76,15 +77,52 @@ public class UserRepository {
     }
 
     public void decrUserPointsBalance(long userId, long decrBy) {
-        decrUserBalance(userId, decrBy, USER_POINTS_PREFIX, LOCK_KEY_POINTS);
+        RedisLock lock = null;
+        try (Jedis jedis = jedisPool.getResource()) {
+            lock = new RedisLock(jedis, LOCK_KEY_POINTS);
+            if (lock.acquireLock()) {
+                jedis.decrBy(USER_POINTS_PREFIX + userId, decrBy);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (lock != null) {
+                lock.releaseLock();
+            }
+        }
     }
 
-    public void decrUserSpinsBalance(long userId, long decrBy) {
-        decrUserBalance(userId, decrBy, USER_SPINS_PREFIX, LOCK_KEY_SPINS);
+    public void updateCurrentUserMission(long userId, Map<String, String> missionData) {
+        RedisLock lock = null;
+        try (Jedis jedis = jedisPool.getResource()) {
+            lock = new RedisLock(jedis, LOCK_KEY_MISSION);
+            if (lock.acquireLock()) {
+                jedis.hset(USER_MISSION_PREFIX + userId, missionData);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (lock != null) {
+                lock.releaseLock();
+            }
+        }
     }
 
-    public void decrUserCoinsBalance(long userId, long decrBy) {
-        decrUserBalance(userId, decrBy, USER_COINS_PREFIX, LOCK_KEY_COINS);
+    public Map<String, String> getCurrentUserMission(long userId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.hgetAll(USER_MISSION_PREFIX + userId);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private int getIntItem(long userId, String keyPrefix) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            String numStr = jedis.get(keyPrefix + userId);
+            return numStr != null ? Integer.parseInt(numStr) : 0;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void incrUserBalance(long userId, long incrBy, String keyPrefix, String lockKey) {
@@ -100,45 +138,6 @@ public class UserRepository {
             if (lock != null) {
                 lock.releaseLock();
             }
-        }
-    }
-
-    private int getBalance(long userId, String keyPrefix) {
-        try (Jedis jedis = jedisPool.getResource()) {
-            String balance = jedis.get(keyPrefix + userId);
-            if (balance != null) {
-                return Integer.parseInt(balance);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        return 0;
-    }
-
-    private void decrUserBalance(long userId, long decrBy, String lockKey, String keyPrefix) {
-        RedisLock lock = null;
-        try (Jedis jedis = jedisPool.getResource()) {
-            lock = new RedisLock(jedis, lockKey);
-            if (lock.acquireLock()) {
-                jedis.decrBy(keyPrefix + userId, decrBy);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        } finally {
-            if (lock != null) {
-                lock.releaseLock();
-            }
-        }
-    }
-
-    public void getUserItemsBalance(long userId, Map<String, Integer> userItemsBalance) {
-        try (Jedis jedis = jedisPool.getResource()) {
-            ObjectMapper objectMapper = new ObjectMapper();
-            String userItemsBalanceJson = objectMapper.writeValueAsString(userItemsBalance);
-            jedis.set(USER_BALANCE_PREFIX + userId, userItemsBalanceJson);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
         }
     }
 }
